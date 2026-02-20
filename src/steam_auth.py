@@ -36,6 +36,16 @@ STEAM_USERDATA_API = "https://store.steampowered.com/dynamicstore/userdata/"
 STEAM_REDEEM_API = "https://store.steampowered.com/account/ajaxregisterkey/"
 
 
+def _stdin_has_data() -> bool:
+    """Check if stdin has data available without blocking."""
+    if sys.platform == "win32":
+        import msvcrt
+        return msvcrt.kbhit()
+    import select
+    ready, _, _ = select.select([sys.stdin], [], [], 0)
+    return bool(ready)
+
+
 def _render_qr(url: str) -> str | None:
     """Render *url* as an ASCII QR code string centered for the terminal. Returns None if qrcode isn't installed."""
     try:
@@ -154,15 +164,6 @@ def _try_qr_login(session: requests.Session) -> requests.Session | None:
     console.print()
 
     # Poll for approval while watching for Enter key (non-blocking stdin)
-    def _stdin_has_data() -> bool:
-        """Check if Enter was pressed without blocking."""
-        if sys.platform == "win32":
-            import msvcrt
-            return msvcrt.kbhit()
-        import select
-        ready, _, _ = select.select([sys.stdin], [], [], 0)
-        return bool(ready)
-
     refresh_token = None
     with console.status("Waiting for QR scan…", spinner="dots"):
         for _ in range(90):  # ~3 minutes
@@ -190,6 +191,50 @@ def _try_qr_login(session: requests.Session) -> requests.Session | None:
 
     print_success("QR login approved!")
     return _finalize_session(session, refresh_token)
+
+
+def _wait_for_code_or_approval(
+    session: requests.Session, client_id: str, request_id: str
+) -> tuple[str | None, str | None]:
+    """Show a 2FA prompt while simultaneously polling for mobile app approval.
+
+    Returns ``(code, refresh_token)`` — exactly one will be set (or both None on timeout).
+    """
+    print_info(
+        "Approve the login on your Steam app, "
+        "or type your 2FA code below."
+    )
+    console.print("[bold cyan]2FA code:[/bold cyan] ", end="", highlight=False)
+    sys.stdout.flush()
+
+    for _ in range(90):  # ~3 minutes
+        if _stdin_has_data():
+            line = sys.stdin.readline().strip()
+            if line:
+                console.print()  # finish the prompt line cleanly
+                return (line, None)
+
+        try:
+            poll_resp = (
+                session.post(
+                    f"{STEAM_API}/IAuthenticationService/PollAuthSessionStatus/v1",
+                    data={"client_id": client_id, "request_id": request_id},
+                    timeout=5,
+                )
+                .json()
+                .get("response", {})
+            )
+            if "refresh_token" in poll_resp:
+                console.print()  # finish the prompt line cleanly
+                print_success("Login approved via Steam app!")
+                return (None, poll_resp["refresh_token"])
+        except Exception:
+            pass
+
+        time.sleep(2)
+
+    console.print()
+    return (None, None)
 
 
 def _credential_login(session: requests.Session) -> requests.Session:
@@ -247,18 +292,26 @@ def _credential_login(session: requests.Session) -> requests.Session:
             for c in begin_data.get("allowed_confirmations", [])
         ]
 
-        if 3 in conf_types:
-            if 4 in conf_types:
-                print_info(
-                    "Approve the login on your Steam app, "
-                    "or enter your 2FA code below."
+        if 3 in conf_types and 4 in conf_types:
+            # Both TOTP and mobile push — poll while waiting for typed code
+            typed_code, early_token = _wait_for_code_or_approval(
+                session, client_id, request_id
+            )
+            if early_token:
+                return _finalize_session(session, early_token)
+            if typed_code:
+                session.post(
+                    f"{STEAM_API}/IAuthenticationService/UpdateAuthSessionWithSteamGuardCode/v1",
+                    data={
+                        "client_id": client_id,
+                        "steamid": steam_id,
+                        "code": typed_code,
+                        "code_type": "3",
+                    },
+                    timeout=15,
                 )
-                twofactor_code = Prompt.ask(
-                    "[bold cyan]2FA code[/bold cyan] [dim](Enter to wait for app)[/dim]",
-                    default="",
-                )
-            else:
-                twofactor_code = Prompt.ask("[bold cyan]2FA code[/bold cyan]")
+        elif 3 in conf_types:
+            twofactor_code = Prompt.ask("[bold cyan]2FA code[/bold cyan]")
             if twofactor_code:
                 session.post(
                     f"{STEAM_API}/IAuthenticationService/UpdateAuthSessionWithSteamGuardCode/v1",
@@ -315,12 +368,16 @@ def _credential_login(session: requests.Session) -> requests.Session:
         return _finalize_session(session, refresh_token)
 
 
-def steam_login() -> requests.Session:
+def steam_login(*, auto: bool = False) -> requests.Session:
     """Sign into Steam web. Tries QR code first, falls back to credentials."""
     # Attempt to use saved session
     r = requests.Session()
     if try_recover_cookies(STEAM_COOKIE_FILE, r) and verify_logins_session(r)[1]:
         return r
+
+    if auto:
+        print_error("Steam session expired. Run interactively to re-authenticate.")
+        sys.exit(1)
 
     # Saved state doesn't work — interactive login
     print_rule("Steam Login")

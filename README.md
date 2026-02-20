@@ -16,7 +16,7 @@ Bulk-redeem your Humble Bundle Steam keys automatically. Detects games you alrea
 
 1. Signs into Humble Bundle (credentials or saved session). If Humble Guard is enabled on your account, you'll be emailed a code to enter.
 2. Fetches all your order details concurrently (30 workers)
-3. You pick a mode
+3. You pick a mode (or `--auto` skips straight to Auto-Redeem)
 4. For Auto-Redeem:
    - Signs into Steam — scan the QR code with your Steam mobile app, or type your credentials manually (supports 2FA codes, Steam Guard, and email codes)
    - Fetches the full Steam app catalog via Web API to check what you own
@@ -24,9 +24,11 @@ Bulk-redeem your Humble Bundle Steam keys automatically. Detects games you alrea
    - Redeems unowned keys, skips owned ones, waits out rate limits
    - Logs results to CSV files (`redeemed.csv`, `already_owned.csv`, `errored.csv`)
 
-### Steam QR Login
+Both Humble and Steam sessions are saved to `.state/` so you only need to log in once. Subsequent runs (including `--auto`) reuse the saved sessions until they expire.
 
-When signing into Steam, the tool displays an ASCII QR code in your terminal:
+### Steam Login
+
+When signing into Steam, the tool first tries QR code login:
 
 ```
     █▀▀▀▀▀▀▀█ ▄▀█▀▄ █▀▀▀▀▀▀▀█
@@ -38,6 +40,8 @@ When signing into Steam, the tool displays an ASCII QR code in your terminal:
 ```
 
 Open the **Steam mobile app** > **Steam Guard** > **Confirm Sign In** (or tap the QR scanner icon), scan the code, and you're logged in — no need to type your username, password, or 2FA code. Press Enter to skip and type credentials instead.
+
+If you skip the QR code and use credentials with 2FA enabled, the tool shows a code prompt while simultaneously polling for Steam mobile app approval. You can either type your TOTP code or just tap "Approve" on your phone — whichever happens first, the tool proceeds automatically.
 
 ## Requirements
 
@@ -61,12 +65,58 @@ If no API key is configured, the tool will prompt you to enter one or skip. With
 ## Usage
 
 ```bash
+steam-redeemer              # Interactive TUI — full menu
+steam-redeemer --auto       # Non-interactive auto-redeem for cron/scheduled runs
+steam-redeemer --help       # Show all flags
+```
+
+Or from source:
+```bash
 python steam_redeem.py
-# or
 python -m src
 ```
 
-The TUI uses arrow-key navigation and single-keypress shortcuts — no need to hit Enter on menus.
+The interactive TUI uses arrow-key navigation and single-keypress shortcuts — no need to hit Enter on menus.
+
+### Scheduled / Cron Mode
+
+The idea: **run interactively once to set up your sessions, then schedule `--auto` for hands-free runs.** No credentials are stored — only session cookies in `.state/`.
+
+#### First-time setup (interactive)
+
+```bash
+steam-redeemer
+```
+
+Log into Humble and Steam when prompted. The tool saves both sessions to `.state/`. If you have a Steam Web API key, enter it when asked (or add it to `config.yaml`) — this enables ownership detection so the tool doesn't waste rate-limit attempts on games you already own.
+
+#### Scheduled runs
+
+```bash
+steam-redeemer --auto
+```
+
+In `--auto` mode the tool:
+- Reuses saved sessions from `.state/` — no login prompts
+- Skips the mode menu and goes straight to auto-redeem
+- Skips unrevealed keys by default (preserving gift links)
+- Exits with code 1 if either session has expired, with a clear error message
+
+If sessions expire, just run interactively once to refresh them.
+
+#### Cron example
+
+Redeem new keys every 6 hours:
+```
+0 */6 * * * /path/to/steam-redeemer --auto >> /path/to/redeem.log 2>&1
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--auto` | Non-interactive mode — requires valid saved sessions in `.state/` |
+| `--reveal-all` | With `--auto`: reveal and redeem unrevealed keys even without ownership data. By default, `--auto` only redeems already-revealed keys to preserve gift links for games you might want to give away. Use this flag if you don't care about gift links and want everything redeemed. |
 
 ## Portable Binary
 

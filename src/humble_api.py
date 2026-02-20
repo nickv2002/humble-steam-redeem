@@ -43,7 +43,7 @@ HUMBLE_HEADERS: dict[str, str] = {
 }
 
 
-def humble_login(session) -> bool:
+def humble_login(session, *, auto: bool = False) -> bool:
     """Log into Humble Bundle. Updates *session* in place. Returns True on success."""
     cls()
 
@@ -56,6 +56,10 @@ def humble_login(session) -> bool:
         return True
     else:
         session.cookies.clear()
+
+    if auto:
+        print_error("Humble session expired. Run interactively to re-authenticate.")
+        sys.exit(1)
 
     # Saved session didn't work — interactive login
     print_rule("Humble Bundle Login")

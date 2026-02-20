@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from concurrent.futures import as_completed
 
@@ -31,16 +32,39 @@ def prompt_mode() -> str:
     return str(idx + 1)
 
 
-def main() -> None:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments."""
+    parser = argparse.ArgumentParser(
+        prog="steam-redeemer",
+        description="Bulk-redeem Humble Bundle Steam keys.",
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Non-interactive mode for cron/scheduled runs. "
+        "Requires valid saved sessions in .state/.",
+    )
+    parser.add_argument(
+        "--reveal-all",
+        action="store_true",
+        help="With --auto: reveal and redeem unrevealed keys even without "
+        "ownership data. Default is to skip unrevealed keys to preserve gift links.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
     """Main orchestration: Humble login -> fetch orders -> mode selection -> dispatch."""
     from src.humble_api import humble_login
+
+    args = _parse_args(argv)
 
     # Redirect stderr to error.log
     sys.stderr = open("error.log", "a")
 
     # Create a consistent session for Humble API use
     humble_session = cloudscraper.CloudScraper()
-    humble_login(humble_session)
+    humble_login(humble_session, auto=args.auto)
     print_success("Successfully signed in on Humble.")
 
     orders = humble_session.get(HUMBLE_ORDERS_API).json()
@@ -62,13 +86,14 @@ def main() -> None:
 
     print_success(f"Fetched {len(order_details)} orders from Humble.")
 
-    desired_mode = prompt_mode()
-    if desired_mode == "2":
-        export_mode(humble_session, order_details)
-        sys.exit()
-    if desired_mode == "3":
-        humble_chooser_mode(humble_session, order_details)
-        sys.exit()
+    if not args.auto:
+        desired_mode = prompt_mode()
+        if desired_mode == "2":
+            export_mode(humble_session, order_details)
+            sys.exit()
+        if desired_mode == "3":
+            humble_chooser_mode(humble_session, order_details)
+            sys.exit()
 
     # Auto-Redeem mode
     steam_keys = list(find_dict_keys(order_details, "steam_app_id", True))
@@ -103,7 +128,9 @@ def main() -> None:
     )
     console.print()
 
-    redeem_steam_keys(humble_session, steam_keys)
+    redeem_steam_keys(
+        humble_session, steam_keys, auto=args.auto, reveal_all=args.reveal_all
+    )
 
 
 if __name__ == "__main__":

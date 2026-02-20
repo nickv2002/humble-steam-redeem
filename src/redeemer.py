@@ -159,16 +159,22 @@ class RedeemDisplay:
         return RichGroup(group, status_panel) if parts else status_panel
 
 
-def redeem_steam_keys(humble_session, humble_keys: list[dict]) -> None:
+def redeem_steam_keys(
+    humble_session,
+    humble_keys: list[dict],
+    *,
+    auto: bool = False,
+    reveal_all: bool = False,
+) -> None:
     """Full auto-redeem pipeline: Steam login, ownership check, redeem with rate-limit handling."""
-    session = steam_login()
+    session = steam_login(auto=auto)
 
     print_success("Successfully signed in on Steam.")
     print_info(
         "Getting your owned content to avoid attempting to register keys already owned…"
     )
 
-    owned_app_details = get_owned_apps(session)
+    owned_app_details = get_owned_apps(session, auto=auto)
     have_ownership = bool(owned_app_details)
 
     if have_ownership:
@@ -198,28 +204,39 @@ def redeem_steam_keys(humble_session, humble_keys: list[dict]) -> None:
         unrevealed_count = len(humble_keys) - len(revealed)
 
         if unrevealed_count:
-            print_warning(
-                f"No API key — can't check which games you already own."
-            )
-            print_warning(
-                f"If an unrevealed key gets revealed for a game you already own, "
-                f"you lose the ability to gift it."
-            )
-            console.print()
-            redeem_all = prompt_yes_no(
-                f"Reveal and redeem all {len(humble_keys)} keys "
-                f"({unrevealed_count} unrevealed)?",
-                default=False,
-            )
-            if redeem_all:
-                unowned_games = list(humble_keys)
-                print_info(f"All {len(unowned_games)} keys will be attempted.")
+            if auto:
+                if reveal_all:
+                    unowned_games = list(humble_keys)
+                    print_info(f"All {len(unowned_games)} keys will be attempted (--reveal-all).")
+                else:
+                    unowned_games = revealed
+                    print_info(
+                        f"{len(unowned_games)} already-revealed keys will be attempted, "
+                        f"{unrevealed_count} unrevealed keys preserved."
+                    )
             else:
-                unowned_games = revealed
-                print_info(
-                    f"{len(unowned_games)} already-revealed keys will be attempted, "
-                    f"{unrevealed_count} unrevealed keys preserved."
+                print_warning(
+                    f"No API key — can't check which games you already own."
                 )
+                print_warning(
+                    f"If an unrevealed key gets revealed for a game you already own, "
+                    f"you lose the ability to gift it."
+                )
+                console.print()
+                redeem_all = prompt_yes_no(
+                    f"Reveal and redeem all {len(humble_keys)} keys "
+                    f"({unrevealed_count} unrevealed)?",
+                    default=False,
+                )
+                if redeem_all:
+                    unowned_games = list(humble_keys)
+                    print_info(f"All {len(unowned_games)} keys will be attempted.")
+                else:
+                    unowned_games = revealed
+                    print_info(
+                        f"{len(unowned_games)} already-revealed keys will be attempted, "
+                        f"{unrevealed_count} unrevealed keys preserved."
+                    )
         else:
             unowned_games = revealed
             print_info(f"{len(unowned_games)} revealed keys will be attempted.")

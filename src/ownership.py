@@ -57,7 +57,7 @@ def fetch_app_list(api_key: str) -> list[dict[str, Any]]:
     return all_apps
 
 
-def get_owned_apps(steam_session) -> dict[int, str]:
+def get_owned_apps(steam_session, *, auto: bool = False) -> dict[int, str]:
     """Get the user's owned content from Steam. Returns {appid: name} dict."""
     owned_content = steam_session.get(STEAM_USERDATA_API).json()
     owned_app_ids = set(owned_content["rgOwnedPackages"] + owned_content["rgOwnedApps"])
@@ -74,6 +74,10 @@ def get_owned_apps(steam_session) -> dict[int, str]:
             print_warning("Could not fetch Steam app list, skipping ownership detection")
             return {}
     else:
+        if auto:
+            print_info("No Steam Web API key found — skipping ownership detection.")
+            return {}
+
         print_warning("No Steam Web API key found.")
         console.print(
             "[dim]A Steam Web API key lets us check which games you already own\n"
