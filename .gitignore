@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# State & secrets
+.state/
+config.yaml
+
+# Legacy (pre-config.yaml)
+.humblecookies
+.steamcookies
+.steam_api_key
+
+# Runtime output
+redeemed.csv
+already_owned.csv
+errored.csv
+skipped.txt
+error.log
+humble_export_*.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
