@@ -12,7 +12,7 @@ from rich.prompt import Prompt
 
 from src import load_config, save_config
 from src.steam_auth import STEAM_USERDATA_API
-from src.utils import console, print_error, print_info, print_success, print_warning, prompt_menu
+from src.utils import console, print_error, print_info, print_success, print_warning
 
 
 def load_steam_api_key() -> str | None:
@@ -88,31 +88,27 @@ def get_owned_apps(steam_session, *, auto: bool = False) -> dict[int, str]:
         )
         console.print()
 
-        idx = prompt_menu(
-            ["Enter API key", "Skip (redeem without ownership check)"],
-            shortcuts=["e", "s"],
-        )
+        api_key = Prompt.ask(
+            "[bold cyan]API key[/bold cyan] [dim](Enter to skip)[/dim]",
+            default="",
+        ).strip()
 
-        if idx == 0:
-            api_key = Prompt.ask("[bold cyan]API key[/bold cyan]").strip()
-            if not api_key:
-                print_warning("No key entered — skipping ownership detection.")
-                return {}
-            # Save for future runs
-            config = load_config()
-            config["steam_api_key"] = api_key
-            save_config(config)
-            print_info("Saved to [cyan]config.yaml[/cyan] for next time.")
-            try:
-                with console.status("Fetching Steam app list…", spinner="dots"):
-                    app_list = fetch_app_list(api_key)
-                print_success(f"Fetched {len(app_list)} apps")
-            except Exception as e:
-                print_error(f"IStoreService/GetAppList error: {e}")
-                print_warning("Could not fetch Steam app list, skipping ownership detection")
-                return {}
-        else:
+        if not api_key:
             print_info("Skipping ownership detection — all keys will be attempted.")
+            return {}
+
+        # Save for future runs
+        config = load_config()
+        config["steam_api_key"] = api_key
+        save_config(config)
+        print_info("Saved to [cyan]config.yaml[/cyan] for next time.")
+        try:
+            with console.status("Fetching Steam app list…", spinner="dots"):
+                app_list = fetch_app_list(api_key)
+            print_success(f"Fetched {len(app_list)} apps")
+        except Exception as e:
+            print_error(f"IStoreService/GetAppList error: {e}")
+            print_warning("Could not fetch Steam app list, skipping ownership detection")
             return {}
 
     return {
