@@ -14,15 +14,30 @@ Bulk-redeem your Humble Bundle Steam keys automatically. Detects games you alrea
 
 ## How It Works
 
-1. Signs into Humble Bundle (credentials or saved session)
+1. Signs into Humble Bundle (credentials or saved session). If Humble Guard is enabled on your account, you'll be emailed a code to enter.
 2. Fetches all your order details concurrently (30 workers)
 3. You pick a mode
 4. For Auto-Redeem:
-   - Signs into Steam via IAuthenticationService (supports 2FA, Steam Guard, email codes)
+   - Signs into Steam — scan the QR code with your Steam mobile app, or type your credentials manually (supports 2FA codes, Steam Guard, and email codes)
    - Fetches the full Steam app catalog via Web API to check what you own
    - Fuzzy-matches game titles to catch DLC/edition variants
    - Redeems unowned keys, skips owned ones, waits out rate limits
    - Logs results to CSV files (`redeemed.csv`, `already_owned.csv`, `errored.csv`)
+
+### Steam QR Login
+
+When signing into Steam, the tool displays an ASCII QR code in your terminal:
+
+```
+    █▀▀▀▀▀▀▀█ ▄▀█▀▄ █▀▀▀▀▀▀▀█
+    █ █▀▀▀█ █ █▄ ▄█ █ █▀▀▀█ █
+    █ █   █ █  ▀█▀  █ █   █ █
+    █ ▀▀▀▀▀ █▀▄▀▄▀▄ █ ▀▀▀▀▀ █
+    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+         (example only)
+```
+
+Open the **Steam mobile app** > **Steam Guard** > **Confirm Sign In** (or tap the QR scanner icon), scan the code, and you're logged in — no need to type your username, password, or 2FA code. Press Enter to skip and type credentials instead.
 
 ## Requirements
 
