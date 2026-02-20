@@ -1,5 +1,7 @@
 # eNkrypt's Steam Redeemer
 
+If you've had a Humble Bundle subscription running for months (or years), you probably have dozens — maybe hundreds — of unclaimed Steam keys sitting in your library. Redeeming them one by one is painfully tedious: reveal the key, copy it, paste it into Steam, hit next, repeat. This tool does all of that for you in one shot.
+
 Bulk-redeem your Humble Bundle Steam keys automatically. Detects games you already own so you don't waste rate limits, preserves gift links for unrevealed keys, and handles Steam's rate limiting with automatic retries.
 
 ## Features
