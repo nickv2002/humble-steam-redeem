@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import time
+import sys
 import webbrowser
 from typing import Any
 
-from rich import box
+from InquirerPy import inquirer
+from InquirerPy.base.control import Choice
+from InquirerPy.prompts.checkbox import CheckboxPrompt
 from rich.markup import escape
 from rich.prompt import Prompt
-from rich.table import Table
 
 from src.humble_api import (
     HUMBLE_CHOOSE_CONTENT,
@@ -27,9 +28,24 @@ from src.utils import (
     print_info,
     print_rule,
     print_success,
-    print_warning,
     prompt_yes_no,
 )
+
+
+class _CountingCheckbox(CheckboxPrompt):
+    """CheckboxPrompt that shows live `(N/MAX selected)` in the instruction line."""
+
+    def __init__(self, *args: Any, max_selected: int, **kwargs: Any) -> None:
+        self._max_selected = max_selected
+        super().__init__(*args, **kwargs)
+
+    @property
+    def instruction(self) -> str:
+        try:
+            n = len(self.selected_choices)
+        except Exception:
+            n = 0
+        return f"({n}/{self._max_selected} selected, space=toggle, enter=confirm)"
 
 
 def choose_games(
@@ -37,12 +53,15 @@ def choose_games(
     choice_month_name: str,
     identifier: str,
     chosen: list[dict[str, Any]],
-) -> None:
-    """Submit chosen games for a Humble Choice month."""
+) -> list[str]:
+    """Submit chosen games for a Humble Choice month. Returns list of failed titles."""
+    failed: list[str] = []
     for choice in chosen:
         display_name = choice["display_item_machine_name"]
         if "tpkds" not in choice:
-            webbrowser.open(f"{HUMBLE_SUB_PAGE}{choice_month_name}/{display_name}")
+            url = f"{HUMBLE_SUB_PAGE}{choice_month_name}/{display_name}"
+            console.print(f"[cyan]Open in browser:[/cyan] {url}")
+            webbrowser.open(url)
         else:
             payload = {
                 "gamekey": choice["tpkds"][0]["gamekey"],
@@ -50,14 +69,29 @@ def choose_games(
                 "chosen_identifiers[]": display_name,
                 "is_multikey_and_from_choice_modal": "false",
             }
-            res = humble_session.post(
-                HUMBLE_CHOOSE_CONTENT, data=payload, headers=HUMBLE_HEADERS
-            ).json()
+            try:
+                res = humble_session.post(
+                    HUMBLE_CHOOSE_CONTENT, data=payload, headers=HUMBLE_HEADERS
+                ).json()
+            except Exception as e:
+                print_error(f"Error choosing {escape(choice['title'])}: {e}")
+                print(
+                    f"choose_games exception for {choice['title']!r}: {e!r}",
+                    file=sys.stderr,
+                )
+                failed.append(choice["title"])
+                continue
             if "success" not in res or not res["success"]:
                 print_error(f"Error choosing {escape(choice['title'])}")
                 console.print(res)
+                print(
+                    f"choose_games failure for {choice['title']!r}: {res!r}",
+                    file=sys.stderr,
+                )
+                failed.append(choice["title"])
             else:
                 print_success(f"Chose game {escape(choice['title'])}")
+    return failed
 
 
 def humble_chooser_mode(
@@ -73,53 +107,24 @@ def humble_chooser_mode(
         redeem_all = None
         if first:
             redeem_keys = prompt_yes_no(
-                "Auto-redeem keys after choosing? (requires Steam login)"
+                "After all months are chosen, sign into Steam and redeem the keys?"
             )
             first = False
 
         ready = False
         while not ready:
             cls()
-            remaining = month["choices_remaining"]
             choices = month["available_choices"]
+            if month.get("uses_choices", True):
+                remaining = month["choices_remaining"]
+                label = f"[cyan]{remaining}[/cyan] choices remaining"
+            else:
+                # v3 unlock-all months: every available game can be claimed.
+                remaining = len(choices)
+                label = f"[cyan]{remaining}[/cyan] games to claim"
 
             month_name = escape(month["product"]["human_name"])
-            print_rule(
-                f"{month_name}  ·  [cyan]{remaining}[/cyan] choices remaining"
-            )
-
-            # Build game listing table
-            table = Table(
-                show_header=True,
-                header_style="bold cyan",
-                border_style="bright_blue",
-                box=box.ROUNDED,
-                padding=(0, 1),
-            )
-            table.add_column("#", style="cyan", justify="right", width=4)
-            table.add_column("Title", style="bold")
-            table.add_column("Rating", style="green")
-            table.add_column("Notes", style="yellow")
-
-            for idx, choice in enumerate(choices):
-                title = escape(choice["title"])
-                rating_text = ""
-                if (
-                    "review_text" in choice.get("user_rating", {})
-                    and "steam_percent|decimal" in choice.get("user_rating", {})
-                ):
-                    rating = choice["user_rating"]["review_text"].replace("_", " ")
-                    percentage = (
-                        str(int(choice["user_rating"]["steam_percent|decimal"] * 100))
-                        + "%"
-                    )
-                    rating_text = f"{rating} ({percentage})"
-                note = ""
-                if "tpkds" not in choice:
-                    note = "Must redeem via Humble"
-                table.add_row(str(idx + 1), title, rating_text, note)
-
-            console.print(table)
+            print_rule(f"{month_name}  ·  {label}")
 
             if redeem_all is None and remaining == len(choices):
                 redeem_all = prompt_yes_no("Redeem all?")
@@ -127,81 +132,98 @@ def humble_chooser_mode(
                 redeem_all = False
 
             if redeem_all:
-                user_input = [str(i + 1) for i in range(len(choices))]
+                chosen = list(choices)
             else:
-                if redeem_keys:
-                    auto_note = " [dim](webpage keys auto-redeemed after)[/dim]"
-                else:
-                    auto_note = ""
-
                 console.print()
                 console.print(
-                    f"Indexes separated by commas "
-                    f"(e.g. [bold]1[/bold] or [bold]1,2,3[/bold])"
-                )
-                console.print(
-                    f"Type [bold]link[/bold] to open in browser{auto_note}"
-                )
-                console.print(
-                    "Press [bold]Enter[/bold] to skip this month"
+                    "[dim]Submit empty for more options (browser / skip).[/dim]"
                 )
                 console.print()
 
-                raw = Prompt.ask("[bold cyan]Selection[/bold cyan]", default="")
-                user_input = [
-                    uinput.strip()
-                    for uinput in raw.split(",")
-                    if uinput.strip()
+                def _label(choice: dict[str, Any]) -> str:
+                    parts = [choice["title"]]
+                    rating = choice.get("user_rating") or {}
+                    review = rating.get("review_text")
+                    pct = rating.get("steam_percent|decimal")
+                    if review and pct is not None:
+                        parts.append(f"  — {review.replace('_', ' ')} ({int(pct * 100)}%)")
+                    elif review:
+                        parts.append(f"  — {review.replace('_', ' ')}")
+                    if "tpkds" not in choice:
+                        parts.append("  [must redeem via Humble]")
+                    return "".join(parts)
+
+                checkbox_choices = [
+                    Choice(value=idx, name=_label(choice))
+                    for idx, choice in enumerate(choices)
                 ]
 
-            if len(user_input) == 0:
-                ready = True
-            elif user_input[0].lower() == "link":
-                webbrowser.open(HUMBLE_SUB_PAGE + month["product"]["choice_url"])
+                try:
+                    selected_indexes = _CountingCheckbox(
+                        message=f"Pick up to {remaining} for {month['product']['human_name']}:",
+                        choices=checkbox_choices,
+                        max_selected=remaining,
+                        transformer=lambda result: f"{len(result)} selected",
+                        validate=lambda result: len(result) <= remaining,
+                        invalid_message=f"Pick at most {remaining}",
+                    ).execute()
+                except KeyboardInterrupt:
+                    ready = True
+                    break
+
+                if not selected_indexes:
+                    next_action = inquirer.select(
+                        message="No games selected. What now?",
+                        choices=[
+                            "Skip this month",
+                            "Open this month in browser",
+                            "Re-pick",
+                        ],
+                    ).execute()
+
+                    if next_action == "Skip this month":
+                        ready = True
+                        continue
+                    if next_action == "Open this month in browser":
+                        url = HUMBLE_SUB_PAGE + month["product"]["choice_url"]
+                        console.print(f"[cyan]Open in browser:[/cyan] {url}")
+                        webbrowser.open(url)
+                        Prompt.ask(
+                            "[dim]Press Enter once you've made your picks in the browser[/dim]",
+                            default="",
+                        )
+                        if redeem_keys:
+                            try_redeem_keys.append(month["gamekey"])
+                        ready = True
+                        continue
+                    # else "Re-pick" — fall through and the loop redraws
+                    continue
+
+                chosen = [choices[i] for i in selected_indexes]
+
+            console.print()
+            console.print("[bold]Selected:[/bold]")
+            for choice in chosen:
+                console.print(f"  [green]{escape(choice['title'])}[/green]")
+            console.print()
+            if prompt_yes_no("Confirm selection?"):
+                choice_month_name = month["product"]["choice_url"]
+                identifier = month["parent_identifier"]
+                failed = choose_games(
+                    humble_session, choice_month_name, identifier, chosen
+                )
+                if failed:
+                    print_error(
+                        f"{len(failed)} pick(s) failed — see above and error.log"
+                    )
+                    Prompt.ask(
+                        "[dim]Press Enter to continue[/dim]", default=""
+                    )
+                    # Stay on this month so the user can retry
+                    continue
                 if redeem_keys:
                     try_redeem_keys.append(month["gamekey"])
-            else:
-                invalid_option = lambda option: (
-                    not option.isnumeric()
-                    or option == "0"
-                    or int(option) > len(choices)
-                )
-                invalid = [opt for opt in user_input if invalid_option(opt)]
-
-                if invalid:
-                    print_error("Invalid options: " + ", ".join(invalid))
-                    time.sleep(2)
-                else:
-                    user_input_set = set(int(opt) for opt in user_input)
-                    chosen = [
-                        choice
-                        for idx, choice in enumerate(choices)
-                        if idx + 1 in user_input_set
-                    ]
-
-                    if len(chosen) > remaining:
-                        print_warning(
-                            f"Too many — only {remaining} choices left"
-                        )
-                        time.sleep(2)
-                    else:
-                        console.print()
-                        console.print("[bold]Selected:[/bold]")
-                        for choice in chosen:
-                            console.print(
-                                f"  [green]{escape(choice['title'])}[/green]"
-                            )
-                        console.print()
-                        confirmed = prompt_yes_no("Confirm selection?")
-                        if confirmed:
-                            choice_month_name = month["product"]["choice_url"]
-                            identifier = month["parent_identifier"]
-                            choose_games(
-                                humble_session, choice_month_name, identifier, chosen
-                            )
-                            if redeem_keys:
-                                try_redeem_keys.append(month["gamekey"])
-                            ready = True
+                ready = True
 
     if first:
         print_info("No Humble Choices need choosing — you're all up-to-date!")
