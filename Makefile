@@ -8,8 +8,10 @@ help:
 	@echo "  make test    - Run all tests (smoke + filter logic)"
 	@echo "  make clean   - Remove generated files and cache"
 
+OWNERSHIP_THRESHOLD ?= 85
+
 run:
-	uv run humble-steam-redeem
+	uv run humble-steam-redeem --ownership-threshold $(OWNERSHIP_THRESHOLD)
 
 install:
 	uv sync
