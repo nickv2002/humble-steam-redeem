@@ -62,12 +62,14 @@ def export_cookies(cookie_file: Union[str, Path], session) -> bool:
 
 
 def verify_logins_session(session) -> list[bool]:
-    """Return ``[humble_logged_in, steam_logged_in]`` for *session*."""
-    results: list[bool] = []
-    for url in [HUMBLE_KEYS_PAGE, STEAM_KEYS_PAGE]:
-        r = session.get(url, allow_redirects=False)
-        results.append(r.status_code not in (301, 302))
-    return results
+    """Return ``[humble_logged_in, steam_logged_in]`` for *session*.
+
+    Humble login is handled by ``HumbleBrowser`` and can't be probed with a
+    plain HTTP session, so the first element is always ``False`` here; callers
+    should only rely on the Steam result.
+    """
+    r = session.get(STEAM_KEYS_PAGE, allow_redirects=False)
+    return [False, r.status_code not in (301, 302)]
 
 
 def valid_steam_key(key: str | None) -> bool:

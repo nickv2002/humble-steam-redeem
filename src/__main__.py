@@ -4,20 +4,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-import time
-from concurrent.futures import as_completed
-
-import cloudscraper
-from requests_futures.sessions import FuturesSession
 
 from src.chooser import humble_chooser_mode
 from src.export import export_mode
-from src.humble_api import HUMBLE_ORDER_DETAILS_API, HUMBLE_ORDERS_API
 from src.ownership import DEFAULT_FILTER_THRESHOLD, DEFAULT_MATCH_THRESHOLD
 from src.redeemer import redeem_steam_keys
 from src.utils import (
     console,
     find_dict_keys,
+    print_error,
     print_info,
     print_rule,
     print_success,
@@ -68,99 +63,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _fetch_order_details(
-    humble_session,
-    orders: list[dict],
-    *,
-    max_workers: int = 15,
-    retries: int = 3,
-) -> tuple[list[dict], list[str]]:
-    """Fetch every order's details, retrying transient failures.
-
-    A single dropped TLS connection (e.g. ``[SSL: UNEXPECTED_EOF_WHILE_READING]``)
-    among the concurrent requests used to crash the whole run (issue #7). Now
-    failed orders are collected and retried sequentially with backoff, and any
-    that still fail are returned to the caller rather than raising.
-    """
-
-    def url(gamekey: str) -> str:
-        return f"{HUMBLE_ORDER_DETAILS_API}{gamekey}?all_tpkds=true"
-
-    order_details: list[dict] = []
-
-    # First pass: concurrent fetch.
-    with FuturesSession(session=humble_session, max_workers=max_workers) as retriever:
-        futures = {
-            retriever.get(url(order["gamekey"])): order["gamekey"] for order in orders
-        }
-        pending: list[str] = []
-        for future in as_completed(futures):
-            gamekey = futures[future]
-            try:
-                order_details.append(future.result().json())
-            except Exception:
-                pending.append(gamekey)
-
-    # Sequential retries with backoff for transient TLS / Cloudflare hiccups.
-    for attempt in range(retries):
-        if not pending:
-            break
-        time.sleep(2 * (attempt + 1))
-        still_failing: list[str] = []
-        for gamekey in pending:
-            try:
-                order_details.append(humble_session.get(url(gamekey)).json())
-            except Exception:
-                still_failing.append(gamekey)
-        pending = still_failing
-
-    return order_details, pending
-
-
-def main(argv: list[str] | None = None) -> None:
-    """Main orchestration: Humble login -> fetch orders -> mode selection -> dispatch."""
-    from src.humble_api import humble_login
-
-    args = _parse_args(argv)
-
-    # Redirect stderr to error.log
-    sys.stderr = open("error.log", "a")
-
-    # Create a consistent session for Humble API use
-    humble_session = cloudscraper.CloudScraper()
-    humble_login(humble_session, auto=args.auto)
-    print_success("Successfully signed in on Humble.")
-
-    orders = humble_session.get(HUMBLE_ORDERS_API).json()
-
-    with console.status(
-        f"Fetching [bold]{len(orders)}[/bold] order details…", spinner="dots"
-    ):
-        order_details, failed = _fetch_order_details(humble_session, orders)
-
-    print_success(f"Fetched {len(order_details)} orders from Humble.")
-    if failed:
-        print_warning(
-            f"Couldn't fetch {len(failed)} of {len(orders)} orders after retries "
-            f"(likely a transient Humble/Cloudflare hiccup) — continuing without "
-            f"them. Re-run to pick them up."
-        )
-
-    if not args.auto:
-        desired_mode = prompt_mode()
-        if desired_mode == "2":
-            export_mode(humble_session, order_details)
-            sys.exit()
-        if desired_mode == "3":
-            humble_chooser_mode(humble_session, order_details)
-            sys.exit()
-
-    # Auto-Redeem mode
-    steam_keys = list(find_dict_keys(order_details, "steam_app_id", True))
-
-    filters = ["errored.csv", "already_owned.csv", "redeemed.csv"]
-    original_length = len(steam_keys)
-    for filter_file in filters:
+def _filter_previous_keys(steam_keys: list[dict]) -> list[dict]:
+    """Drop keys already recorded in errored/already_owned/redeemed CSVs."""
+    for filter_file in ["errored.csv", "already_owned.csv", "redeemed.csv"]:
         try:
             with open(filter_file, "r", encoding="utf-8-sig") as f:
                 rows = [line.strip().split(",") for line in f if line.strip()]
@@ -171,29 +76,78 @@ def main(argv: list[str] | None = None) -> None:
             ]
         except Exception:
             pass
-    if len(steam_keys) != original_length:
-        print_info(
-            f"Filtered {original_length - len(steam_keys)} keys from previous runs"
+    return steam_keys
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Main orchestration: Humble login -> fetch orders -> mode selection -> dispatch."""
+    from src.humble_browser import HumbleBrowser, HumbleLoginRequired
+
+    args = _parse_args(argv)
+
+    # Redirect stderr to error.log
+    sys.stderr = open("error.log", "a")
+
+    browser = HumbleBrowser()
+    try:
+        try:
+            browser.ensure_logged_in(interactive=not args.auto)
+        except HumbleLoginRequired:
+            print_error(
+                "Humble session expired \u2014 run without --auto to log in "
+                "(needs your authenticator code)."
+            )
+            sys.exit(1)
+        print_success("Successfully signed in on Humble.")
+
+        with console.status("Fetching Humble orders\u2026", spinner="dots"):
+            order_details, failed = browser.fetch_order_details()
+
+        print_success(f"Fetched {len(order_details)} orders from Humble.")
+        if failed:
+            print_warning(
+                f"Couldn't fetch {len(failed)} orders — continuing without "
+                f"them. Re-run to pick them up."
+            )
+
+        if not args.auto:
+            desired_mode = prompt_mode()
+            if desired_mode == "2":
+                export_mode(browser, order_details)
+                sys.exit()
+            if desired_mode == "3":
+                humble_chooser_mode(browser, order_details)
+                sys.exit()
+
+        # Auto-Redeem mode
+        steam_keys = list(find_dict_keys(order_details, "steam_app_id", True))
+        original_length = len(steam_keys)
+        steam_keys = _filter_previous_keys(steam_keys)
+        if len(steam_keys) != original_length:
+            print_info(
+                f"Filtered {original_length - len(steam_keys)} keys from previous runs"
+            )
+
+        revealed = sum(1 for k in steam_keys if k.get("redeemed_key_val"))
+        unrevealed = len(steam_keys) - revealed
+
+        print_rule("Key Summary")
+        console.print(f"[bold]{len(steam_keys)}[/bold] Steam keys total")
+        console.print(
+            f"[green]{revealed}[/green] revealed  \u00b7  "
+            f"[yellow]{unrevealed}[/yellow] unrevealed"
         )
+        console.print()
 
-    revealed = sum(1 for k in steam_keys if "redeemed_key_val" in k)
-    unrevealed = len(steam_keys) - revealed
-
-    print_rule("Key Summary")
-    console.print(f"[bold]{len(steam_keys)}[/bold] Steam keys total")
-    console.print(
-        f"[green]{revealed}[/green] revealed  ·  "
-        f"[yellow]{unrevealed}[/yellow] unrevealed"
-    )
-    console.print()
-
-    redeem_steam_keys(
-        humble_session,
-        steam_keys,
-        auto=args.auto,
-        reveal_all=args.reveal_all,
-        ownership_threshold=args.ownership_threshold,
-    )
+        redeem_steam_keys(
+            browser,
+            steam_keys,
+            auto=args.auto,
+            reveal_all=args.reveal_all,
+            ownership_threshold=args.ownership_threshold,
+        )
+    finally:
+        browser.close()
 
 
 if __name__ == "__main__":

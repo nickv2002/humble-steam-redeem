@@ -193,7 +193,7 @@ def redeem_steam_keys(
     if have_ownership:
         with console.status("Checking ownership…", spinner="dots"):
             noted_keys = [
-                key for key in humble_keys if key["steam_app_id"] not in owned_app_details
+                key for key in humble_keys if key.get("steam_app_id") not in owned_app_details
             ]
             skipped_games: dict[str, dict] = {}
             unowned_games: list[dict] = []
@@ -206,7 +206,7 @@ def redeem_steam_keys(
                     match_threshold=match_threshold,
                 )
                 if best_match[1] is not None and best_match[1] in owned_app_details:
-                    skipped_games[game["human_name"].strip()] = game
+                    skipped_games[(game.get("human_name") or "").strip()] = game
                 else:
                     unowned_games.append(game)
 
@@ -218,7 +218,7 @@ def redeem_steam_keys(
             write_skipped(skipped_games)
     else:
         # No ownership data — warn and let user decide
-        revealed = [k for k in humble_keys if "redeemed_key_val" in k]
+        revealed = [k for k in humble_keys if k.get("redeemed_key_val")]
         unrevealed_count = len(humble_keys) - len(revealed)
 
         if unrevealed_count:
@@ -268,13 +268,13 @@ def redeem_steam_keys(
     with Live(display.build(), console=console, refresh_per_second=4) as live:
         with KeyFileManager() as kfm:
             for key in unowned_games:
-                name = key["human_name"]
+                name = key.get("human_name") or "(unknown)"
                 display.set_current(name)
                 live.update(display.build())
 
                 # Duplicate check
                 if name in seen or (
-                    key["steam_app_id"] is not None
+                    key.get("steam_app_id")
                     and key["steam_app_id"] in seen
                 ):
                     kfm.write_key(9, key)
@@ -283,19 +283,19 @@ def redeem_steam_keys(
                     live.update(display.build())
                     continue
                 else:
-                    if key["steam_app_id"] is not None:
+                    if key.get("steam_app_id"):
                         seen.add(key["steam_app_id"])
                     seen.add(name)
 
                 # Reveal unrevealed keys on Humble
-                if "redeemed_key_val" not in key:
+                if not key.get("redeemed_key_val"):
                     display.set_current(name, "[dim]Revealing key on Humble…[/dim]")
                     live.update(display.build())
                     redeemed_key = redeem_humble_key(humble_session, key)
                     key["redeemed_key_val"] = redeemed_key
 
                 # Invalid key format
-                if not valid_steam_key(key["redeemed_key_val"]):
+                if not valid_steam_key(key.get("redeemed_key_val")):
                     kfm.write_key(1, key)
                     display.errors += 1
                     display.log(f"[red]✗[/red] {escape(name)} [dim]— invalid key format[/dim]")

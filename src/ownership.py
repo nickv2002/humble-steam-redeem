@@ -140,11 +140,11 @@ def match_ownership(
     at the cost of missing some legitimate DLC/edition variants.
     """
     matches = [
-        (fuzz.token_set_ratio(appname, game["human_name"]), appid)
+        (fuzz.token_set_ratio(appname, game.get("human_name") or ""), appid)
         for appid, appname in owned_app_details.items()
     ]
     refined_matches = [
-        (fuzz.token_sort_ratio(owned_app_details[appid], game["human_name"]), appid)
+        (fuzz.token_sort_ratio(owned_app_details[appid], game.get("human_name") or ""), appid)
         for score, appid in matches
         if score > filter_threshold
     ]

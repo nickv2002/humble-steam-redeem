@@ -74,14 +74,14 @@ def export_mode(humble_session, order_details: list[dict[str, Any]]) -> None:
 
     keys: list[dict] = []
     for tpk in keylist:
-        revealed = "redeemed_key_val" in tpk
+        revealed = bool(tpk.get("redeemed_key_val"))
         export = (export_revealed and revealed) or (export_unrevealed and not revealed)
 
         if export:
-            if export_unrevealed and confirm_reveal:
+            if not revealed and export_unrevealed and confirm_reveal:
                 tpk["redeemed_key_val"] = redeem_humble_key(humble_session, tpk)
 
-            if owned_app_details is not None and "steam_app_id" in tpk:
+            if owned_app_details is not None and tpk.get("steam_app_id"):
                 owned = tpk["steam_app_id"] in owned_app_details
                 if not owned:
                     best_match = match_ownership(owned_app_details, tpk)

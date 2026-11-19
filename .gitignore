@@ -32,3 +32,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Local Humble secrets / browser profile
+humble-login.env
+.humble-browser-profile/
+.state/humble-browser-profile/
