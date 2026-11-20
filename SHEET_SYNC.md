@@ -1,7 +1,7 @@
 # Syncing key exports into the shared Google Sheet
 
 Runbook for an agent (or a human). The owner exports keys roughly every 1-2 months after a Humble
-bundle, so don't rely on memory: follow this. Last done: 2026-11-19.
+bundle, so don't rely on memory: follow this. Last done: 2026-11-20.
 
 Sheet: https://docs.google.com/spreadsheets/d/1R8QwHHPwQlZjZrZFPhL5SW7ar7mLa9kxB1lxuiP-VhQ
 (spreadsheetId `1R8QwHHPwQlZjZrZFPhL5SW7ar7mLa9kxB1lxuiP-VhQ`). It is shared with friends who claim keys.
@@ -36,7 +36,7 @@ Files begin with a UTF-8 BOM (strip it). Many rows have an empty key: those cann
 - `How to claim` (sheetId 2010): instructions for friends. Don't change unless asked.
 - Raw record tabs, never edit, only add: `humble_export_20260410-232712` (original ~533 rows; 30 rows hidden
   because they were claimed by comment), `added 2026-05-24`, `already_owned`, `errored`, `redeemed`,
-  `humble_export_20260717-005328`, `humble_export_20261024-154453`.
+  `humble_export_20260717-005328`, `humble_export_20261024-154453`, `humble_export_20261119-162827`, `humble_export_20261120-134831`.
 - Keys is static on purpose (claims need stable rows). It is NOT a formula over the raw tabs.
 
 ## Procedure for a new export
